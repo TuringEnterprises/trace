@@ -1,5 +1,9 @@
-const { app, BrowserWindow, ipcMain, Menu, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, desktopCapturer, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
+const ffmpegStatic = require('ffmpeg-static');
+const ffmpeg = require('fluent-ffmpeg');
+ffmpeg.setFfmpegPath(ffmpegStatic);
 require('dotenv').config();
 const isDev = process.env.MODE === 'development'
 
@@ -77,4 +81,51 @@ ipcMain.handle('get-video-sources', async () => {
     console.log("ERROR : MAIN : get-video-sources > ", error);
     throw error;
   }
+});
+
+ipcMain.handle('convert-video', async (event, buffer) => {
+  return new Promise((resolve, reject) => {
+    const tempFilePath = path.join(app.getPath('temp'), 'temp-video.webm');
+    fs.writeFileSync(tempFilePath, Buffer.from(buffer));
+
+    // Convert the file first
+    const convertedTempPath = path.join(app.getPath('temp'), `converted-${new Date().getTime()}.mp4`);
+
+    ffmpeg(tempFilePath)
+      .outputFormat('mp4')
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .save(convertedTempPath)
+      .on('end', async () => {
+        console.log('File has been converted successfully');
+
+        // After conversion, ask the user where to save the file
+        const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, { // mainWindow is your BrowserWindow instance
+          title: 'Save your recorded video',
+          defaultPath: `recorded-video-${new Date().getTime()}.mp4`,
+          buttonLabel: 'Save Video',
+          filters: [
+            { name: 'Movies', extensions: ['mp4'] }
+          ]
+        });
+
+        // If the user cancels, or doesn't provide a filePath, clean up the temp file
+        if (canceled || !filePath) {
+          fs.unlinkSync(convertedTempPath); // Remove the converted file from temp
+          reject(new Error('Save dialog was cancelled.'));
+        } else {
+          // If they choose a location, move the temp file to the chosen location
+          fs.renameSync(convertedTempPath, filePath);
+          resolve(filePath);
+        }
+        
+        fs.unlinkSync(tempFilePath); // Clean up the original temp file
+      })
+      .on('error', (err) => {
+        console.error('An error occurred: ' + err.message);
+        fs.unlinkSync(tempFilePath); // Clean up the original temp file
+        fs.unlinkSync(convertedTempPath); // Remove the converted file from temp
+        reject(err);
+      });
+  });
 });

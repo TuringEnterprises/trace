@@ -80,17 +80,15 @@ const recordVideo = async () => {
   };
 
   mediaRecorder.onstop = async () => {
-    console.log('mediaRecorder stopped');
     const blob = new Blob(recordedChunks, { type: 'video/webm; codecs=vp9' });
+    const buffer = await blob.arrayBuffer();
+    const uint8Array = new Uint8Array(buffer);
     recordedChunks = [];
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'recorded-video.webm';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    window.electronAPI.convertVideo(uint8Array).then(outputPath => {
+      console.log('Video converted to:', outputPath);
+    }).catch(error => {
+      console.error('Error converting video:', error);
+    });
   };
 
   mediaRecorder.start();
